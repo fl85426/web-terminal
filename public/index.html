@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web Terminal</title>
+  <link rel="stylesheet" href="/vendor/xterm.css" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
+    #terminal {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      padding: 6px; box-sizing: border-box;
+    }
+    #status {
+      position: fixed; right: 10px; bottom: 8px; z-index: 10;
+      font: 12px/1.4 monospace; color: #888; opacity: .7;
+    }
+    /* 密码遮罩 */
+    #gate {
+      position: fixed; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(20,20,20,.92); color: #d4d4d4;
+      font: 14px/1.5 monospace;
+    }
+    #gate .box {
+      background: #252526; border: 1px solid #3c3c3c; border-radius: 8px;
+      padding: 22px 26px; width: 320px;
+    }
+    #gate h1 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+    #gate input {
+      width: 100%; box-sizing: border-box; padding: 8px 10px; margin: 8px 0;
+      border: 1px solid #3c3c3c; background: #1e1e1e; color: #d4d4d4;
+      border-radius: 4px; font: 14px monospace;
+    }
+    #gate button {
+      width: 100%; padding: 8px; border: 0; border-radius: 4px;
+      background: #0e639c; color: #fff; font: 14px monospace; cursor: pointer;
+    }
+    #gate button:hover { background: #1177bb; }
+    #gate .err { color: #f48771; min-height: 18px; margin-bottom: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <div id="status">连接中…</div>
+
+  <div id="gate">
+    <div class="box">
+      <h1>🔒 需要访问密码</h1>
+      <div class="err" id="gateErr"></div>
+      <input id="gateInput" type="password" placeholder="请输入访问密码" autocomplete="off" />
+      <button id="gateBtn">进入终端</button>
+    </div>
+  </div>
+
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
+  <script src="/vendor/addon-web-links.js"></script>
+  <script>
+    // addon 全局名兼容（不同 UMD 打包可能挂在命名空间或直接挂类）
+    const FitAddonClass = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
+    const WebLinksAddonClass =
+      (window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon) || window.WebLinksAddon;
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace',
+      theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+    });
+    const fitAddon = new FitAddonClass();
+    term.loadAddon(fitAddon);
+    if (WebLinksAddonClass) term.loadAddon(new WebLinksAddonClass());
+
+    term.open(document.getElementById('terminal'));
+    fitAddon.fit();
+
+    const statusEl = document.getElementById('status');
+    const gate = document.getElementById('gate');
+    const gateInput = document.getElementById('gateInput');
+    const gateErr = document.getElementById('gateErr');
+    function setStatus(t) { statusEl.textContent = t; }
+
+    let ws = null;
+    let pingTimer = null;
+    let reconnectTimer = null;
+    let currentToken = sessionStorage.getItem('wb_term_token') || '';
+
+    function connect(token) {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const url =
+        proto + '://' + location.host + '/ws' +
+        (token ? '?token=' + encodeURIComponent(token) : '');
+
+      if (ws) {
+        try { ws.onclose = null; ws.close(); } catch (e) {}
+      }
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setStatus('已连接');
+        gate.style.display = 'none';
+        gateErr.textContent = '';
+        // 应用层心跳：即便网关忽略控制帧也能保活
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) {}
+          }
+        }, 20000);
+        fitAddon.fit();
+        term.focus();
+      };
+
+      ws.onmessage = (e) => term.write(e.data);
+
+      ws.onclose = (e) => {
+        if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+        if (e.code === 4401) {
+          // 令牌错误 → 清掉缓存，重新弹密码框
+          sessionStorage.removeItem('wb_term_token');
+          currentToken = '';
+          gate.style.display = 'flex';
+          gateErr.textContent = '密码错误，请重试';
+          setStatus('需要密码');
+          return;
+        }
+        // 其它断开 → 自动重连（去掉超时限制，不再秒断即死）
+        setStatus('重连中…');
+        term.write('\r\n\x1b[33m[连接断开，正在重连…]\x1b[0m\r\n');
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => connect(currentToken), 3000);
+      };
+
+      ws.onerror = () => { /* 错误由 onclose 统一处理 */ };
+    }
+
+    // 先探测服务端是否启用了密码；未启用则直接连
+    fetch('/auth/required')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.required) currentToken = '';
+        connect(currentToken);
+      })
+      .catch(() => {
+        connect(currentToken);
+      });
+
+    term.onData((data) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data }));
+      }
+    });
+    term.onResize((size) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+      }
+    });
+
+    window.addEventListener('resize', () => fitAddon.fit());
+
+    // 密码框交互
+    function submitToken() {
+      const v = gateInput.value;
+      if (!v) return;
+      currentToken = v;
+      sessionStorage.setItem('wb_term_token', v);
+      connect(currentToken);
+    }
+    document.getElementById('gateBtn').addEventListener('click', submitToken);
+    gateInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitToken(); });
+    gateInput.focus();
+  </script>
+</body>
+</html>

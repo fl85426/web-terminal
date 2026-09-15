@@ -1,0 +1,11 @@
+{
+  "name": "web-terminal",
+  "version": "1.0.0",
+  "description": "Standalone web terminal with xterm.js frontend",
+  "main": "server.js",
+  "scripts": {
+	  "start": "ACCESS_TOKEN=Xwxs@515800 NODE_PATH=/.PlnPyKFp4CRfFtgC1/terminal/node_modules /.PlnPyKFp4CRfFtgC1/lib/node server.js"
+  },
+  "dependencies": {},
+  "type": "commonjs"
+}
