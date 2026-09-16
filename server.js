@@ -1,15 +1,23 @@
 'use strict';
 
 // 本地部署：从项目根目录 .env 读取配置（PORT / ACCESS_TOKEN / SHELL / HOME）
-require('dotenv').config();
+try {
+  require('dotenv').config();
+} catch (e) {
+  /* ignore if dotenv is missing */
+}
 
 // 独立 Web 终端后端：Express + express-ws + node-pty
-// 依赖（express / express-ws / node-pty）复用 terminal/app 已编译的 node_modules，
-// 通过 NODE_PATH 解析（见 package.json 的 start 脚本）。
 const path = require('path');
 const express = require('express');
 const expressWs = require('express-ws');
-const pty = require('@homebridge/node-pty-prebuilt-multiarch');
+
+let pty;
+try {
+  pty = require('@homebridge/node-pty-prebuilt-multiarch');
+} catch (e) {
+  pty = require('node-pty');
+}
 
 // 访问令牌：从 .env（dotenv）或环境变量 ACCESS_TOKEN 读取。
 // 为空字符串时不校验（无密码模式）。

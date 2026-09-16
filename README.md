@@ -17,9 +17,9 @@
 
 ```
 web-terminal/
-|-- server.js                 # 后端：Express + express-ws + node-pty（require 已指向预编译 fork）
-|-- package.json              # 当前运行配置（Windows 通用部署版）
-|-- package.portable.json     # Linux/macOS 通用部署模板（node-pty 需本地编译）
+|-- server.js                 # 后端：Express + express-ws + node-pty（自动回退支持 @homebridge/node-pty-prebuilt-multiarch 和 node-pty）
+|-- package.json              # 当前运行配置
+|-- package.portable.json     # Linux/macOS 通用部署模板（包含 dotenv 及 node-pty 依赖）
 |-- package.sandbox.json.bak  # 原沙箱环境 package.json 备份（NODE_PATH 复用版）
 |-- .env                      # 运行配置：PORT / ACCESS_TOKEN / SHELL / HOME（dotenv 自动加载）
 |-- .gitignore                # 忽略 .env、node_modules、运行日志
@@ -63,9 +63,9 @@ HOME=C:\Users\你的用户名
 
 ## 安装部署
 
-### 方式一：Windows 原生部署（本机已采用）
+### 方式一：Windows 原生部署
 
-1. 依赖：package.json 中以 @homebridge/node-pty-prebuilt-multiarch 替代 node-pty（API 完全兼容，仅 require 名称不同），server.js 的 require 同步替换。
+1. 依赖：package.json 中支持 @homebridge/node-pty-prebuilt-multiarch，server.js 内部已加入 fallback 兼容机制，可自动识别预编译包或官方 node-pty。
 2. 安装依赖（自动从 GitHub Releases 下载 win-x64 预编译二进制，全程无需 MSVC / Visual Studio）：
 
 ```
